@@ -1,0 +1,6 @@
+{
+  "name": "AI Post Architect",
+  "description": "Auto-generate engaging Facebook posts summarizing the latest AI developments using Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
