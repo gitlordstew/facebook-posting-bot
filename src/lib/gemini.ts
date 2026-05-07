@@ -9,19 +9,24 @@ export interface AIUpdate {
   summary: string;
   importance: 'low' | 'medium' | 'high';
   tags: string[];
+  date: string;
+  url: string;
 }
 
 export interface GeneratedPost {
   content: string;
-  hashtags: string[];
   suggestedImagePrompt: string;
+  imageUrl?: string;
 }
 
 export async function fetchLatestAINews(): Promise<AIUpdate[]> {
+  const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "Summarize the top 5 most significant developments in Artificial Intelligence from the last 7 days. Focus on breakthroughs, major tech company announcements, and research papers. Return them as a JSON list.",
+      contents: `Search for and summarize the top 5 most significant REAL breakthroughs in Artificial Intelligence released today, ${today}, or in the last 24 hours. 
+      CRITICAL: You MUST provide EXACT, FUNCTIONAL source URLs for each item discovered via search. DO NOT hallucinate URLs. 
+      Return them as a JSON list.`,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
@@ -31,11 +36,13 @@ export async function fetchLatestAINews(): Promise<AIUpdate[]> {
             type: "object",
             properties: {
               title: { type: "string" },
-              summary: { type: "string" },
+              summary: { type: "string", description: "A highly detailed factual summary discovered from search results." },
               importance: { type: "string", enum: ["low", "medium", "high"] },
-              tags: { type: "array", items: { type: "string" } }
+              tags: { type: "array", items: { type: "string" } },
+              date: { type: "string", description: "The specific release date found in the search results." },
+              url: { type: "string", description: "The EXACT direct source URL found in search results." }
             },
-            required: ["title", "summary", "importance", "tags"]
+            required: ["title", "summary", "importance", "tags", "date", "url"]
           }
         }
       }
@@ -48,30 +55,66 @@ export async function fetchLatestAINews(): Promise<AIUpdate[]> {
   }
 }
 
+export async function generateAIImage(prompt: string): Promise<string> {
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-image',
+    contents: {
+      parts: [
+        {
+          text: `Professional, high-quality, digital art for social media about AI: ${prompt}`,
+        },
+      ],
+    },
+    config: {
+      imageConfig: {
+        aspectRatio: "16:9"
+      }
+    }
+  });
+
+  for (const part of response.candidates[0].content.parts) {
+    if (part.inlineData) {
+      return `data:image/png;base64,${part.inlineData.data}`;
+    }
+  }
+  throw new Error("No image data returned from Gemini");
+}
+
 export async function generateFacebookPost(
   topic: string, 
-  tone: 'professional' | 'enthusiastic' | 'informative' | 'minimalist'
+  tone: 'professional' | 'enthusiastic' | 'informative' | 'minimalist' | 'visionary' | 'analytical',
+  sourceUrl?: string,
+  context?: string
 ): Promise<GeneratedPost> {
   const toneGuide = {
     professional: "Authoritative, industry-focused, polished language, and insightful.",
     enthusiastic: "High energy, full of emojis, use of exclamations, focus on 'game-changing' aspects.",
     informative: "Clear, structured, bullet points, educational, focus on facts.",
-    minimalist: "Short, punchy, one or two sentences, high impact, very few hashtags."
+    minimalist: "Short, punchy, one or two sentences, high impact.",
+    visionary: "Futuristic, philosophical, focusing on long-term impact and the evolution of humanity.",
+    analytical: "Critical, data-driven, examining limitations, and practical use-cases."
   };
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `Topic: ${topic}\nTone: ${toneGuide[tone]}\n\nGenerate a Facebook post summarizing this development. Include line breaks for readability.`,
+    contents: `Topic: ${topic}
+    ${context ? `Context/Ground Truth: ${context}` : ""}
+    Tone: ${toneGuide[tone]}
+    
+    Generate a compelling Facebook post summarizing this AI development. 
+    ${sourceUrl ? `CRITICAL: You MUST include the text "See more: ${sourceUrl}" as the ABSOLUTE FINAL LINE of the post. Nothing should follow this link.` : "Do not include any hashtags at the end of the post."}
+    
+    CRITICAL: Use ONLY the provided context and facts. Do not hallucinate data.
+    Ensure the content is engaging and includes appropriate line breaks.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
         type: "object",
         properties: {
-          content: { type: "string", description: "The main body of the post." },
-          hashtags: { type: "array", items: { type: "string" } },
-          suggestedImagePrompt: { type: "string", description: "A prompt to use with an AI image generator to accompany this post." }
+          content: { type: "string", description: "The main body of the post. Conclude strictly with 'See more: [URL]' if provided." },
+          suggestedImagePrompt: { type: "string", description: "A high-quality image generation prompt." }
         },
-        required: ["content", "hashtags", "suggestedImagePrompt"]
+        required: ["content", "suggestedImagePrompt"]
       }
     }
   });
