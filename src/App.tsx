@@ -32,6 +32,7 @@ export default function App() {
   const [customUrl, setCustomUrl] = useState('');
   const [tone, setTone] = useState<'professional' | 'enthusiastic' | 'informative' | 'minimalist' | 'visionary' | 'analytical'>('informative');
   const [post, setPost] = useState<GeneratedPost | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedImage, setCopiedImage] = useState(false);
 
@@ -60,6 +61,7 @@ export default function App() {
 
     setGeneratingPost(true);
     setPost(null); 
+    setError(null);
     try {
       const result = await generateFacebookPost(topic, tone, url, summaryContext);
       setPost(result);
@@ -74,8 +76,10 @@ export default function App() {
         setGeneratingImage(false);
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+      const isQuotaError = error?.message?.includes('429') || error?.message?.includes('quota');
+      setError(isQuotaError ? "API Rate Limit Exceeded. Please try again in 1-2 minutes." : "Failed to generate post. Please check your configuration.");
     } finally {
       setGeneratingPost(false);
     }
@@ -412,6 +416,20 @@ export default function App() {
                       <div className="text-sm font-bold text-slate-800">Visual Synthesis Active</div>
                     </div>
                   </div>
+
+                  {error && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-700 m-3"
+                    >
+                      <AlertCircle className="w-5 h-5 shrink-0" />
+                      <div>
+                        <div className="font-bold text-sm">System Interruption</div>
+                        <p className="text-xs opacity-80 mt-0.5">{error}</p>
+                      </div>
+                    </motion.div>
+                  )}
 
                   <div className="p-3 flex items-center justify-between border-b border-slate-200 mx-3">
                     <div className="flex items-center gap-1">
