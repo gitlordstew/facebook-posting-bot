@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -14,10 +15,7 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Initialize Gemini AI - Not needed in backend for this app
-  // const apiKey = process.env.GEMINI_API_KEY;
-
-  // API Routes - AI routes removed as they should be client-side
+  // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });

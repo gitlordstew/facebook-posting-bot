@@ -5,8 +5,8 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || '' 
 });
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
-const DEFAULT_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+const DEFAULT_MODEL = "gemini-3-flash-preview";
+const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
 
 export async function fetchLatestAINews(): Promise<AIUpdate[]> {
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
