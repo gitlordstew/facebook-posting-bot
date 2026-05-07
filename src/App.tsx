@@ -25,6 +25,7 @@ import { fetchLatestAINews, generateFacebookPost, generateAIImage, AIUpdate, Gen
 export default function App() {
   const [news, setNews] = useState<AIUpdate[]>([]);
   const [loadingNews, setLoadingNews] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [generatingPost, setGeneratingPost] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<AIUpdate | null>(null);
@@ -41,11 +42,14 @@ export default function App() {
 
   const loadNews = async () => {
     setLoadingNews(true);
+    setError(null);
     try {
       const updates = await fetchLatestAINews();
       setNews(updates);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+      const isQuota = error?.message?.includes('429') || error?.status === 429 || error?.message?.toLowerCase().includes('resource_exhausted');
+      setError(isQuota ? "Free tier quota reached. Retrying automatically or please wait a minute..." : "Failed to load news feed.");
     } finally {
       setLoadingNews(false);
     }
@@ -60,6 +64,7 @@ export default function App() {
 
     setGeneratingPost(true);
     setPost(null); 
+    setError(null);
     try {
       const result = await generateFacebookPost(topic, tone, url, summaryContext);
       setPost(result);
@@ -68,14 +73,18 @@ export default function App() {
       try {
         const imageUrl = await generateAIImage(result.suggestedImagePrompt);
         setPost(prev => prev ? { ...prev, imageUrl } : null);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Image generation failed", err);
+        const isQuota = err?.message?.includes('429') || err?.status === 429 || err?.message?.toLowerCase().includes('resource_exhausted');
+        if (isQuota) setError("Post content ready! Image synthesis is slowed down by Free Tier rate limits.");
       } finally {
         setGeneratingImage(false);
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+      const isQuota = error?.message?.includes('429') || error?.status === 429 || error?.message?.toLowerCase().includes('resource_exhausted');
+      setError(isQuota ? "Free tier capacity reached. Content architecting will resume shortly." : "Failed to generate content.");
     } finally {
       setGeneratingPost(false);
     }
@@ -137,7 +146,10 @@ export default function App() {
       <nav className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 shadow-sm z-50">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-sm">AI</div>
-          <h1 className="text-xl font-bold text-slate-800 tracking-tight">FeedGen <span className="text-blue-600">AI</span></h1>
+          <div className="flex flex-col">
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">FeedGen <span className="text-blue-600">AI</span></h1>
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Free Tier Limited</span>
+          </div>
         </div>
             <div className="flex items-center gap-4">
               <div className="hidden md:flex items-center gap-2 text-xs font-semibold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
@@ -156,6 +168,25 @@ export default function App() {
       </nav>
 
       <main className="flex-1 flex overflow-hidden p-6 gap-6">
+        <AnimatePresence>
+          {error && (
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="absolute top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-md"
+            >
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <p className="text-xs font-bold">{error}</p>
+                <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">
+                  <Check className="w-4 h-4" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
         {/* Left Column: News & Settings */}
         <section className="w-1/3 flex flex-col gap-5 min-w-[320px]">
           <div className="flex items-center justify-between shrink-0">
