@@ -4,6 +4,8 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || '' 
 });
 
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+
 export interface AIUpdate {
   title: string;
   summary: string;
@@ -23,7 +25,7 @@ export async function fetchLatestAINews(): Promise<AIUpdate[]> {
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: DEFAULT_MODEL,
       contents: `Search for and summarize the top 5 most significant REAL breakthroughs in Artificial Intelligence released today, ${today}, or in the last 24 hours. 
       CRITICAL: You MUST provide EXACT, FUNCTIONAL source URLs for each item discovered via search. DO NOT hallucinate URLs. 
       Return them as a JSON list.`,
@@ -96,7 +98,7 @@ export async function generateFacebookPost(
   };
 
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: DEFAULT_MODEL,
     contents: `Topic: ${topic}
     ${context ? `Context/Ground Truth: ${context}` : ""}
     Tone: ${toneGuide[tone]}
