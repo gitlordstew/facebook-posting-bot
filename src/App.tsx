@@ -70,8 +70,10 @@ export default function App() {
       try {
         const imageUrl = await generateAIImage(result.suggestedImagePrompt);
         setPost(prev => prev ? { ...prev, imageUrl } : null);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Image generation failed", err);
+        const isQuotaError = err?.message?.includes('429') || err?.message?.includes('quota');
+        setError(isQuotaError ? "Image generation rate limit exceeded. Please wait a moment." : "Visual synthesis failed. You can retry below.");
       } finally {
         setGeneratingImage(false);
       }
@@ -128,8 +130,11 @@ export default function App() {
     try {
       const imageUrl = await generateAIImage(post.suggestedImagePrompt);
       setPost(prev => prev ? { ...prev, imageUrl } : null);
-    } catch (err) {
+      setError(null);
+    } catch (err: any) {
       console.error("Image generation failed", err);
+      const isQuotaError = err?.message?.includes('429') || err?.message?.includes('quota');
+      setError(isQuotaError ? "Image generation rate limit exceeded. Please wait a moment." : "Failed to generate image. Please try again.");
     } finally {
       setGeneratingImage(false);
     }

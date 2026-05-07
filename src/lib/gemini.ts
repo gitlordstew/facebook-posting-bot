@@ -5,7 +5,7 @@ const ai = new GoogleGenAI({
 });
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
-const DEFAULT_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image-preview";
+const DEFAULT_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
 
 export interface AIUpdate {
   title: string;
