@@ -1,26 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
+import { AIUpdate, GeneratedPost } from "../types";
 
 const ai = new GoogleGenAI({ 
   apiKey: process.env.GEMINI_API_KEY || '' 
 });
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
 const DEFAULT_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
-
-export interface AIUpdate {
-  title: string;
-  summary: string;
-  importance: 'low' | 'medium' | 'high';
-  tags: string[];
-  date: string;
-  url: string;
-}
-
-export interface GeneratedPost {
-  content: string;
-  suggestedImagePrompt: string;
-  imageUrl?: string;
-}
 
 export async function fetchLatestAINews(): Promise<AIUpdate[]> {
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -34,16 +20,16 @@ export async function fetchLatestAINews(): Promise<AIUpdate[]> {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
-          type: "array",
+          type: "array" as any,
           items: {
-            type: "object",
+            type: "object" as any,
             properties: {
-              title: { type: "string" },
-              summary: { type: "string", description: "A highly detailed factual summary discovered from search results." },
-              importance: { type: "string", enum: ["low", "medium", "high"] },
-              tags: { type: "array", items: { type: "string" } },
-              date: { type: "string", description: "The specific release date found in the search results." },
-              url: { type: "string", description: "The EXACT direct source URL found in search results." }
+              title: { type: "string" as any },
+              summary: { type: "string" as any, description: "A highly detailed factual summary discovered from search results." },
+              importance: { type: "string" as any, enum: ["low", "medium", "high"] },
+              tags: { type: "array" as any, items: { type: "string" as any } },
+              date: { type: "string" as any, description: "The specific release date found in the search results." },
+              url: { type: "string" as any, description: "The EXACT direct source URL found in search results." }
             },
             required: ["title", "summary", "importance", "tags", "date", "url"]
           }
@@ -54,7 +40,7 @@ export async function fetchLatestAINews(): Promise<AIUpdate[]> {
     return JSON.parse(response.text);
   } catch (error) {
     console.error("Error fetching news:", error);
-    return [];
+    throw error;
   }
 }
 
@@ -84,7 +70,7 @@ export async function generateAIImage(prompt: string): Promise<string> {
 }
 
 export async function generateFacebookPost(
-  topic: string, 
+  topic: string,
   tone: 'professional' | 'enthusiastic' | 'informative' | 'minimalist' | 'visionary' | 'analytical',
   sourceUrl?: string,
   context?: string
@@ -112,10 +98,10 @@ export async function generateFacebookPost(
     config: {
       responseMimeType: "application/json",
       responseSchema: {
-        type: "object",
+        type: "object" as any,
         properties: {
-          content: { type: "string", description: "The main body of the post. Conclude strictly with 'See more: [URL]' if provided." },
-          suggestedImagePrompt: { type: "string", description: "A high-quality image generation prompt." }
+          content: { type: "string" as any, description: "The main body of the post. Conclude strictly with 'See more: [URL]' if provided." },
+          suggestedImagePrompt: { type: "string" as any, description: "A high-quality image generation prompt." }
         },
         required: ["content", "suggestedImagePrompt"]
       }

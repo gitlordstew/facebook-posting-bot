@@ -20,7 +20,8 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { fetchLatestAINews, generateFacebookPost, generateAIImage, AIUpdate, GeneratedPost } from './lib/gemini';
+import { fetchLatestAINews, generateFacebookPost, generateAIImage } from './lib/gemini';
+import { AIUpdate, GeneratedPost } from './types';
 
 export default function App() {
   const [news, setNews] = useState<AIUpdate[]>([]);
@@ -42,11 +43,14 @@ export default function App() {
 
   const loadNews = async () => {
     setLoadingNews(true);
+    setError(null);
     try {
       const updates = await fetchLatestAINews();
       setNews(updates);
-    } catch (error) {
-      console.error(error);
+    } catch (err: any) {
+      console.error(err);
+      const isQuotaError = err?.message?.includes('429') || err?.message?.includes('quota');
+      setError(isQuotaError ? "News API Rate Limit Exceeded. Please refresh in a minute." : "Failed to load latest AI updates.");
     } finally {
       setLoadingNews(false);
     }
