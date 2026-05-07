@@ -4,7 +4,8 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || '' 
 });
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+const DEFAULT_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image-preview";
 
 export interface AIUpdate {
   title: string;
@@ -59,7 +60,7 @@ export async function fetchLatestAINews(): Promise<AIUpdate[]> {
 
 export async function generateAIImage(prompt: string): Promise<string> {
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-image',
+    model: DEFAULT_IMAGE_MODEL,
     contents: {
       parts: [
         {
