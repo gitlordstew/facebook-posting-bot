@@ -332,9 +332,8 @@ async function fetchLatestAINewsInternal(force: boolean = false): Promise<AIUpda
   }
 }
 
-async function startServer() {
+export async function createApp() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 
@@ -519,9 +518,18 @@ async function startServer() {
     });
   }
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createApp();
+  const PORT = Number(process.env.PORT) || 3000;
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
