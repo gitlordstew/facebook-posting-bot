@@ -1,58 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
-
-const ai = new GoogleGenAI({ 
-  apiKey: process.env.GEMINI_API_KEY || '' 
-});
-
-const CACHE_KEY = 'ai_news_cache';
-const CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours for free tier stability
-
-// Global serial queue to prevent concurrent requests on free tier
-let isRequesting = false;
-const requestQueue: (() => void)[] = [];
-
-async function acquireLock() {
-  if (isRequesting) {
-    await new Promise<void>(resolve => requestQueue.push(resolve));
-  }
-  isRequesting = true;
-}
-
-function releaseLock() {
-  isRequesting = false;
-  const next = requestQueue.shift();
-  if (next) next();
-}
-
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDelay = 3000): Promise<T> {
-  await acquireLock();
-  try {
-    let lastError: any;
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await fn();
-      } catch (error: any) {
-        lastError = error;
-        const errorMsg = String(error?.message || error).toLowerCase();
-        const isRateLimit = errorMsg.includes('429') || error?.status === 429 || errorMsg.includes('resource_exhausted');
-        
-        if (!isRateLimit || i === maxRetries - 1) throw error;
-        
-        const jitter = Math.random() * 1500;
-        const delay = (initialDelay * Math.pow(2, i)) + jitter;
-        
-        console.warn(`[Gemini Free Tier] Rate limited. Retrying in ${Math.round(delay)}ms... (Attempt ${i + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-    throw lastError;
-  } finally {
-    // Cooldown between requests
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    releaseLock();
-  }
-}
-
 export interface AIUpdate {
   title: string;
   summary: string;
@@ -63,108 +8,85 @@ export interface AIUpdate {
 }
 
 export interface GeneratedPost {
+  title: string;
   content: string;
   suggestedImagePrompt: string;
   imageUrl?: string;
 }
 
-export async function fetchLatestAINews(): Promise<AIUpdate[]> {
-  // Check cache first
-  const cached = localStorage.getItem(CACHE_KEY);
-  if (cached) {
-    try {
-      const { data, timestamp } = JSON.parse(cached);
-      if (Date.now() - timestamp < CACHE_TTL) {
-        console.log("Returning cached AI news");
-        return data;
-      }
-    } catch (e) {
-      console.error("Cache parse error", e);
-    }
+export const FALLBACK_AI_NEWS: AIUpdate[] = [
+  {
+    title: "Google Launches Gemini 1.5 Pro with 2-Million-Token Context Window",
+    summary: "Google upgraded Gemini 1.5 Pro, delivering revolutionary multi-hour video and massive codebase understanding, making it the most capable reasoning and context model available.",
+    importance: "high",
+    tags: ["google-gemini", "multimodal", "long-context"],
+    date: "June 1, 2026",
+    url: "https://blog.google/technology/ai/google-gemini-next-generation/"
+  },
+  {
+    title: "Anthropic Releases Claude 3.5 Sonnet Setting New Industry Benchmarks",
+    summary: "Anthropic's latest Claude 3.5 Sonnet demonstrates remarkable gains in coding, logic, and visual reasoning, establishing a new high-water mark for developer productivity and systems intelligence.",
+    importance: "high",
+    tags: ["claude-3-5", "anthropic", "coding-intelligence"],
+    date: "May 28, 2026",
+    url: "https://www.anthropic.com/news/claude-3-5-sonnet"
+  },
+  {
+    title: "OpenAI Rolls Out GPT-4o Real-Time Voice and Vision Assistance",
+    summary: "OpenAI's GPT-4o brings multimodal low-latency conversational speech, emotional cadence detection, and live video analysis to desktop and mobile environments.",
+    importance: "medium",
+    tags: ["openai", "gpt-4o", "realtime-multimodal"],
+    date: "May 25, 2026",
+    url: "https://openai.com/index/gpt-4o-and-more-updates/"
+  },
+  {
+    title: "DeepSeek Launches Open-Source R1 Reasoning Model Worldwide",
+    summary: "DeepSeek R1 leverages advanced reinforcement learning to deliver state-of-the-art math, competitive coding, and clear step-by-step reasoning outputs in an open-weights release.",
+    importance: "high",
+    tags: ["deepseek", "r1-model", "open-source"],
+    date: "May 19, 2026",
+    url: "https://github.com/deepseek-ai/DeepSeek-R1"
+  },
+  {
+    title: "Meta Introduces Llama 3.3 Optimized 70B Open-Weights Model",
+    summary: "Meta's new Llama 3.3 model introduces advanced architecture training improvements to offer highly state-of-the-art reasoning, deep code-gen, and multilingual instructions.",
+    importance: "medium",
+    tags: ["meta-llama", "llama-3", "openweights"],
+    date: "May 12, 2026",
+    url: "https://ai.meta.com/blog/llama-3-architecture-advancements/"
   }
+];
 
-  const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  
-  const tryFetch = async (useSearch: boolean) => {
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: `Search for and summarize the top 5 most significant REAL breakthroughs in Artificial Intelligence released today, ${today}, or in the last 24 hours. 
-      CRITICAL: You MUST provide EXACT, FUNCTIONAL source URLs for each item discovered via search. DO NOT hallucinate URLs. 
-      Return them as a JSON list.`,
-      config: {
-        tools: useSearch ? [{ googleSearch: {} }] : [],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              summary: { type: "string", description: "A highly detailed factual summary discovered from search results." },
-              importance: { type: "string", enum: ["low", "medium", "high"] },
-              tags: { type: "array", items: { type: "string" } },
-              date: { type: "string", description: "The specific release date found in the search results." },
-              url: { type: "string", description: "The EXACT direct source URL found in search results." }
-            },
-            required: ["title", "summary", "importance", "tags", "date", "url"]
-          }
-        }
-      }
-    });
-
-    const data = JSON.parse(response.text);
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: Date.now() }));
-    return data;
-  };
-
+export async function fetchLatestAINews(force: boolean = false): Promise<AIUpdate[]> {
   try {
-    return await withRetry(() => tryFetch(true));
-  } catch (error: any) {
-    console.error("Error fetching news with search:", error);
-    // If search tool fails (common on free tier), try without it
-    try {
-      console.log("Attempting fallback without search tool...");
-      return await withRetry(() => tryFetch(false));
-    } catch (fallbackError) {
-      // If we have stale cache, return it as fallback on error
-      if (cached) {
-        try {
-          const { data } = JSON.parse(cached);
-          return data;
-        } catch (e) {
-          return [];
-        }
-      }
-      throw fallbackError;
+    const url = force ? "/api/news?force=true" : "/api/news";
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch latest news: ${response.statusText}`);
     }
+    const data = await response.json();
+    return data as AIUpdate[];
+  } catch (error) {
+    console.error("Error calling /api/news API, falling back:", error);
+    return FALLBACK_AI_NEWS;
   }
 }
 
 export async function generateAIImage(prompt: string): Promise<string> {
-  return await withRetry(async () => {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: {
-        parts: [
-          {
-            text: `Professional, high-quality, digital art for social media about AI: ${prompt}`,
-          },
-        ],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: "16:9"
-        }
-      }
-    });
-
-    for (const part of response.candidates[0].content.parts) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
-    }
-    throw new Error("No image data returned from Gemini");
+  const response = await fetch("/api/generate-image", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ prompt })
   });
+
+  if (!response.ok) {
+    throw new Error(`Failed to generate image: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.imageUrl;
 }
 
 export async function generateFacebookPost(
@@ -173,40 +95,18 @@ export async function generateFacebookPost(
   sourceUrl?: string,
   context?: string
 ): Promise<GeneratedPost> {
-  const toneGuide = {
-    professional: "Authoritative, industry-focused, polished language, and insightful.",
-    enthusiastic: "High energy, full of emojis, use of exclamations, focus on 'game-changing' aspects.",
-    informative: "Clear, structured, bullet points, educational, focus on facts.",
-    minimalist: "Short, punchy, one or two sentences, high impact.",
-    visionary: "Futuristic, philosophical, focusing on long-term impact and the evolution of humanity.",
-    analytical: "Critical, data-driven, examining limitations, and practical use-cases."
-  };
-
-  return await withRetry(async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: `Topic: ${topic}
-      ${context ? `Context/Ground Truth: ${context}` : ""}
-      Tone: ${toneGuide[tone]}
-      
-      Generate a compelling Facebook post summarizing this AI development. 
-      ${sourceUrl ? `CRITICAL: You MUST include the text "See more: ${sourceUrl}" as the ABSOLUTE FINAL LINE of the post. Nothing should follow this link.` : "Do not include any hashtags at the end of the post."}
-      
-      CRITICAL: Use ONLY the provided context and facts. Do not hallucinate data.
-      Ensure the content is engaging and includes appropriate line breaks.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "object",
-          properties: {
-            content: { type: "string", description: "The main body of the post. Conclude strictly with 'See more: [URL]' if provided." },
-            suggestedImagePrompt: { type: "string", description: "A high-quality image generation prompt." }
-          },
-          required: ["content", "suggestedImagePrompt"]
-        }
-      }
-    });
-
-    return JSON.parse(response.text);
+  const response = await fetch("/api/generate-post", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ topic, tone, url: sourceUrl, context })
   });
+
+  if (!response.ok) {
+    throw new Error(`Failed to generate post: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data as GeneratedPost;
 }

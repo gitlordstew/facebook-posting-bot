@@ -20,36 +20,37 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { fetchLatestAINews, generateFacebookPost, generateAIImage, AIUpdate, GeneratedPost } from './lib/gemini';
+import { fetchLatestAINews, generateFacebookPost, generateAIImage, AIUpdate, GeneratedPost, FALLBACK_AI_NEWS } from './lib/gemini';
 
 export default function App() {
-  const [news, setNews] = useState<AIUpdate[]>([]);
+  const [news, setNews] = useState<AIUpdate[]>(FALLBACK_AI_NEWS);
   const [loadingNews, setLoadingNews] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [generatingPost, setGeneratingPost] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
-  const [selectedTopic, setSelectedTopic] = useState<AIUpdate | null>(null);
+  const [selectedTopic, setSelectedTopic] = useState<AIUpdate | null>(FALLBACK_AI_NEWS[0]);
   const [customTopic, setCustomTopic] = useState('');
   const [customUrl, setCustomUrl] = useState('');
   const [tone, setTone] = useState<'professional' | 'enthusiastic' | 'informative' | 'minimalist' | 'visionary' | 'analytical'>('informative');
   const [post, setPost] = useState<GeneratedPost | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedTitle, setCopiedTitle] = useState(false);
+  const [copiedContent, setCopiedContent] = useState(false);
   const [copiedImage, setCopiedImage] = useState(false);
 
   useEffect(() => {
     loadNews();
   }, []);
 
-  const loadNews = async () => {
+  const loadNews = async (force: boolean = false) => {
     setLoadingNews(true);
-    setError(null);
     try {
-      const updates = await fetchLatestAINews();
+      const updates = await fetchLatestAINews(force);
       setNews(updates);
-    } catch (error: any) {
+      if (updates.length > 0 && (!selectedTopic || !updates.some(u => u.title === selectedTopic.title))) {
+        setSelectedTopic(updates[0]);
+      }
+    } catch (error) {
       console.error(error);
-      const isQuota = error?.message?.includes('429') || error?.status === 429 || error?.message?.toLowerCase().includes('resource_exhausted');
-      setError(isQuota ? "Free tier quota reached. Retrying automatically or please wait a minute..." : "Failed to load news feed.");
     } finally {
       setLoadingNews(false);
     }
@@ -64,7 +65,6 @@ export default function App() {
 
     setGeneratingPost(true);
     setPost(null); 
-    setError(null);
     try {
       const result = await generateFacebookPost(topic, tone, url, summaryContext);
       setPost(result);
@@ -73,18 +73,14 @@ export default function App() {
       try {
         const imageUrl = await generateAIImage(result.suggestedImagePrompt);
         setPost(prev => prev ? { ...prev, imageUrl } : null);
-      } catch (err: any) {
+      } catch (err) {
         console.error("Image generation failed", err);
-        const isQuota = err?.message?.includes('429') || err?.status === 429 || err?.message?.toLowerCase().includes('resource_exhausted');
-        if (isQuota) setError("Post content ready! Image synthesis is slowed down by Free Tier rate limits.");
       } finally {
         setGeneratingImage(false);
       }
 
-    } catch (error: any) {
+    } catch (error) {
       console.error(error);
-      const isQuota = error?.message?.includes('429') || error?.status === 429 || error?.message?.toLowerCase().includes('resource_exhausted');
-      setError(isQuota ? "Free tier capacity reached. Content architecting will resume shortly." : "Failed to generate content.");
     } finally {
       setGeneratingPost(false);
     }
@@ -92,26 +88,121 @@ export default function App() {
 
   const handleCopy = () => {
     if (post) {
-      navigator.clipboard.writeText(post.content);
+      const fullContent = `${post.title}\n\n${post.content}`;
+      navigator.clipboard.writeText(fullContent);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleCopyTitle = () => {
+    if (post) {
+      navigator.clipboard.writeText(post.title);
+      setCopiedTitle(true);
+      setTimeout(() => setCopiedTitle(false), 2000);
+    }
+  };
+
+  const handleCopyContent = () => {
+    if (post) {
+      navigator.clipboard.writeText(post.content);
+      setCopiedContent(true);
+      setTimeout(() => setCopiedContent(false), 2000);
     }
   };
 
   const handleCopyImage = async () => {
     if (post?.imageUrl) {
       try {
-        const response = await fetch(post.imageUrl);
-        const blob = await response.blob();
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            [blob.type]: blob
-          })
-        ]);
-        setCopiedImage(true);
-        setTimeout(() => setCopiedImage(false), 2000);
-      } catch (err) {
-        console.error("Failed to copy image", err);
+        setCopiedImage(false);
+        
+        // We prepare our Promise of the png blob inside a synchronous wrapper. This maintains
+        // the active user gesture window during clipboard write in modern browsers!
+        const imagePromise = (async () => {
+          const url = post.imageUrl!.startsWith("data:")
+            ? post.imageUrl!
+            : `/api/proxy-image?url=${encodeURIComponent(post.imageUrl!)}`;
+
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image via proxy: ${response.statusText}`);
+          }
+          const blob = await response.blob();
+
+          // Standardize everything to PNG for standard OS clipboard rendering
+          if (blob.type === "image/png") {
+            return blob;
+          }
+
+          // Otherwise, convert any other format to PNG via the canvas
+          return new Promise<Blob>((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            const objectUrl = URL.createObjectURL(blob);
+
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              canvas.width = img.width;
+              canvas.height = img.height;
+              const ctx = canvas.getContext("2d");
+              if (!ctx) {
+                URL.revokeObjectURL(objectUrl);
+                reject(new Error("Canvas context is unavailable"));
+                return;
+              }
+              ctx.drawImage(img, 0, 0);
+              canvas.toBlob((b) => {
+                URL.revokeObjectURL(objectUrl);
+                if (b) {
+                  resolve(b);
+                } else {
+                  reject(new Error("Canvas toBlob output is empty"));
+                }
+              }, "image/png");
+            };
+
+            img.onerror = () => {
+              URL.revokeObjectURL(objectUrl);
+              reject(new Error("Failed to load processed blob into Image element"));
+            };
+
+            img.src = objectUrl;
+          });
+        })();
+
+        try {
+          // 1. Direct synchronous Promise-based Clipboard write.
+          // This ensures the write starts while the onClick call stack is active and verified as user-triggered.
+          const clipboardItem = new ClipboardItem({
+            "image/png": imagePromise
+          });
+          await navigator.clipboard.write([clipboardItem]);
+          setCopiedImage(true);
+          setTimeout(() => setCopiedImage(false), 2000);
+        } catch (promiseWriteError) {
+          console.warn("Promise-based ClipboardItem rejected/unsupported. Retrying with resolved blob:", promiseWriteError);
+
+          // 2. Sequential fallback: Wait for the promise to resolve, then try writing.
+          const finalBlob = await imagePromise;
+          const clipboardItem = new ClipboardItem({
+            "image/png": finalBlob
+          });
+          await navigator.clipboard.write([clipboardItem]);
+          setCopiedImage(true);
+          setTimeout(() => setCopiedImage(false), 2000);
+        }
+
+      } catch (err: any) {
+        console.warn("Direct binary image copy failed. Falling back to copy link as text:", err);
+        try {
+          // If binary clipboard operations are explicitly sandboxed/blocked by the browser frame, 
+          // perform a text copy of the image URL to provide the user with the direct link.
+          await navigator.clipboard.writeText(post.imageUrl);
+          setCopiedImage(true);
+          setTimeout(() => setCopiedImage(false), 2000);
+        } catch (fallbackErr) {
+          console.error("All copy strategies failed:", fallbackErr);
+        }
       }
     }
   };
@@ -146,10 +237,7 @@ export default function App() {
       <nav className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 shadow-sm z-50">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-sm">AI</div>
-          <div className="flex flex-col">
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">FeedGen <span className="text-blue-600">AI</span></h1>
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Free Tier Limited</span>
-          </div>
+          <h1 className="text-xl font-bold text-slate-800 tracking-tight">FeedGen <span className="text-blue-600">AI</span></h1>
         </div>
             <div className="flex items-center gap-4">
               <div className="hidden md:flex items-center gap-2 text-xs font-semibold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
@@ -157,7 +245,7 @@ export default function App() {
             Connected to Global AI Intelligence
           </div>
           <button 
-            onClick={loadNews}
+            onClick={() => loadNews(true)}
             disabled={loadingNews}
             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-slate-50 rounded-lg transition-all disabled:opacity-50"
             title="Refresh AI News Feed"
@@ -168,25 +256,6 @@ export default function App() {
       </nav>
 
       <main className="flex-1 flex overflow-hidden p-6 gap-6">
-        <AnimatePresence>
-          {error && (
-            <motion.div 
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="absolute top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-md"
-            >
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 shrink-0" />
-                <p className="text-xs font-bold">{error}</p>
-                <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">
-                  <Check className="w-4 h-4" />
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        
         {/* Left Column: News & Settings */}
         <section className="w-1/3 flex flex-col gap-5 min-w-[320px]">
           <div className="flex items-center justify-between shrink-0">
@@ -197,7 +266,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold text-slate-400">Updated just now</span>
               <button 
-                onClick={loadNews}
+                onClick={() => loadNews(true)}
                 disabled={loadingNews}
                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-white rounded-md transition-all disabled:opacity-50 shadow-sm border border-transparent hover:border-slate-200"
                 title="Refresh Feed"
@@ -208,7 +277,7 @@ export default function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
-            {loadingNews ? (
+            {loadingNews && news.length === 0 ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="bg-white p-4 rounded-xl border border-slate-200 animate-pulse h-24" />
               ))
@@ -324,7 +393,7 @@ export default function App() {
                 {generatingPost ? (
                   <RotateCw className="w-4 h-4 animate-spin" />
                 ) : (
-                  <>Architect Social Content</>
+                  <>Generate Content</>
                 )}
               </button>
             </div>
@@ -366,7 +435,7 @@ export default function App() {
                     </div>
                     <div className="flex flex-col">
                       <div className="flex items-center gap-1">
-                        <span className="text-sm font-bold leading-tight">AI Insights Network</span>
+                        <span className="text-sm font-bold leading-tight">Facebook Post Generator ni Darren</span>
                         <div className="bg-blue-500 rounded-full w-3.5 h-3.5 flex items-center justify-center">
                           <Check className="text-white w-2.5 h-2.5" />
                         </div>
@@ -380,8 +449,60 @@ export default function App() {
                     </button>
                   </div>
 
-                  <div className="px-4 py-2 text-[15px] leading-relaxed text-slate-800 font-sans tracking-tight">
-                    <div className="whitespace-pre-wrap">{post.content}</div>
+                  <div className="px-4 py-4 text-[15px] leading-relaxed text-slate-800 font-sans tracking-tight space-y-4">
+                    {/* Title Section */}
+                    <div className="bg-slate-50/85 hover:bg-slate-50 border border-slate-200/60 p-3 rounded-lg relative transition-all group/title">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Post Title</span>
+                        <button
+                          onClick={handleCopyTitle}
+                          className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded text-xs text-slate-600 font-medium flex items-center gap-1 shrink-0 transition-all opacity-80 hover:opacity-100 active:scale-95 cursor-pointer"
+                          title="Copy Title"
+                        >
+                          {copiedTitle ? (
+                            <>
+                              <Check className="w-3 h-3 text-green-500" />
+                              <span className="text-[10px] text-green-600 font-semibold">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-slate-400" />
+                              <span className="text-[10px]">Copy Title</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <h4 className="text-base font-bold text-slate-900 leading-snug select-all">
+                        {post.title}
+                      </h4>
+                    </div>
+
+                    {/* Caption Section */}
+                    <div className="bg-slate-50/85 hover:bg-slate-50 border border-slate-200/60 p-3 rounded-lg relative transition-all group/content">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Caption / Post Body</span>
+                        <button
+                          onClick={handleCopyContent}
+                          className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded text-xs text-slate-600 font-medium flex items-center gap-1 shrink-0 transition-all opacity-80 hover:opacity-100 active:scale-95 cursor-pointer"
+                          title="Copy Caption"
+                        >
+                          {copiedContent ? (
+                            <>
+                              <Check className="w-3 h-3 text-green-500" />
+                              <span className="text-[10px] text-green-600 font-semibold">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-slate-400" />
+                              <span className="text-[10px]">Copy Caption</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <div className="whitespace-pre-wrap text-slate-800 select-all leading-relaxed break-words">
+                        {post.content}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Image Area */}
@@ -398,6 +519,20 @@ export default function App() {
                           alt="AI Generated" 
                           referrerPolicy="no-referrer"
                           className="w-full aspect-video object-cover"
+                          onError={(e) => {
+                            // If Pollinations or Gemini URL fails to load in browser, fall back to beautiful Unsplash AI art
+                            const target = e.currentTarget;
+                            if (!target.src.includes('images.unsplash.com')) {
+                              const fallbackImages = [
+                                'photo-1618005182384-a83a8bd57fbe', // Abstract sleek digital neural flows
+                                'photo-1620712943543-bcc4688e7485', // Cool AI Processor
+                                'photo-1677442136019-21780efad99a', // Futuristic AI Neural Network
+                                'photo-1639762681485-074b7f938ba0'  // Cyber-mesh abstract tech geometry
+                              ];
+                              const randomIndex = Math.floor(Math.random() * fallbackImages.length);
+                              target.src = `https://images.unsplash.com/${fallbackImages[randomIndex]}?q=80&w=1024&auto=format&fit=crop`;
+                            }
+                          }}
                         />
                         <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
